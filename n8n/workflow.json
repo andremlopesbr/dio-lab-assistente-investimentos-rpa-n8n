@@ -1,0 +1,557 @@
+{
+  "name": "Análise Perfil Investidor - DIO",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "clientes-rpa-dio",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        16,
+        -368
+      ],
+      "id": "8850dc6b-c488-45fb-940a-c884d68f6a50",
+      "name": "Webhook",
+      "webhookId": "650df05d-b32e-49a0-b82c-69f5368ff631"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2384,
+        -352
+      ],
+      "id": "cfd649ed-272c-45e6-ac90-58bea50b0e89",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "url": "https://digitalinnovationone.github.io/dio-lab-assistente-investimentos-rpa-n8n/data.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        -272
+      ],
+      "id": "83a060c6-927f-4497-8453-cd73b8762826",
+      "name": "Get Perfil Investidor"
+    },
+    {
+      "parameters": {
+        "jsCode": "const csvRaw = $json.data ?? $json.body ?? $json;\nconst text = (typeof csvRaw === \"string\") ? csvRaw :\nJSON.stringify(csvRaw);\n\nconst lines = text.split(/\\r?\\n/).map(l => l.trim()).filter(Boolean);\nconst headers = lines[0].split(\",\").map(h => h.trim());\n\nconst investimentos = lines.slice(1).map(line => {\n  const cols = line.split(\",\").map(c => c.trim());\n  const obj = {};\n  headers.forEach((h, i) => obj[h] = cols[i] ?? \"\");\n\n  // normaliza mínimo para número\n  obj.minimo = Number(String(obj.minimo).replace(/[^\\d]/g, \"\")) || 0;\n\n  return obj;\n});\n\nreturn [{ json: { investimentos } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -272
+      ],
+      "id": "15ffa33f-fbf8-4d45-a101-2f524eb63601",
+      "name": "Converter em JSON"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        688,
+        -352
+      ],
+      "id": "f39197a2-ca2b-4857-b977-6224b50f2875",
+      "name": "Combinar Clientes e Perfis"
+    },
+    {
+      "parameters": {
+        "jsCode": "const clientes = $input.first().json.body?.clientes || $input.first().json.clientes || [];\nconst investimentos = $input.first().json.investimentos || [];\n\n// Função para escolher uma mensagem aleatória\nconst pick = (arr) => arr[Math.floor(Math.random() * arr.length)];\n\nconst resultados = clientes.map(c => {\n  const nome = c.nome;\n  const email = c.email;\n  const perfil = c.perfil;\n\n  // Extrai apenas os números e converte o saldo para float\n  const saldoNum = Number(c.saldo.replace(/[^\\d,]/g, '').replace(',', '.'));\n\n  // Encontra o investimento compatível com o perfil\n  const recomendacoes = investimentos.filter(inv => inv.perfil === perfil);\n  const escolhido = recomendacoes.length > 0 ? recomendacoes[0] : null;\n\n  let motivo = \"\";\n  let mensagens = [];\n\n  if (escolhido) {\n    if (saldoNum >= escolhido.minimo) {\n      motivo = \"saldo_ok\";\n      mensagens = [\n        `Olá ${nome}! Pelo seu perfil (${perfil}), uma boa opção é **${escolhido.produto}** (mínimo R$ ${escolhido.minimo}). Com seu saldo atual (${c.saldo}), você já consegue investir. Rentabilidade: ${escolhido.rentabilidade}.`,\n        `Oi ${nome}! Recomendação para perfil ${perfil}: **${escolhido.produto}** (mínimo R$ ${escolhido.minimo}). Seu saldo (${c.saldo}) já atende o mínimo. Rentabilidade: ${escolhido.rentabilidade}.`,\n        `${nome}, indo direto ao ponto: para o perfil ${perfil}, **${escolhido.produto}** (mínimo R$ ${escolhido.minimo}). Você tem ${c.saldo}, então dá pra aplicar. Rentabilidade: ${escolhido.rentabilidade}.`\n      ];\n    } else {\n      motivo = \"saldo_insuficiente\";\n      mensagens = [\n        `Olá ${nome}. Seu perfil é ${perfil} e indicamos **${escolhido.produto}**. Porém, o aporte mínimo é R$ ${escolhido.minimo} e seu saldo atual é ${c.saldo}. Continue poupando! Rentabilidade: ${escolhido.rentabilidade}.`,\n        `Oi ${nome}! Para investir em **${escolhido.produto}** (ideal para o perfil ${perfil}), você precisa de pelo menos R$ ${escolhido.minimo}. Seu saldo atual é ${c.saldo}. Rentabilidade esperada: ${escolhido.rentabilidade}.`\n      ];\n    }\n  }\n\n  return {\n    nome,\n    email,\n    perfil,\n    saldo_texto: c.saldo,\n    saldo_num: saldoNum,\n    recomendacao: escolhido,\n    motivo,\n    mensagens,\n    mensagem_escolhida: mensagens.length > 0 ? pick(mensagens) : \"Nenhuma recomendação.\"\n  };\n});\n\n// Retorna a estrutura unificada conforme exigido\nreturn [{\n  json: {\n    ok: true,\n    total_clientes: resultados.length,\n    total_investimentos: investimentos.length,\n    resultados\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        -352
+      ],
+      "id": "02b358e5-ac14-4708-8b84-229b3ce9512c",
+      "name": "Mensagem"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega o array de resultados consolidado no nó anterior\nconst resultados = $input.first().json.resultados || [];\n\n// Transforma o array em múltiplos itens independentes para o n8n (10 items)\nconst items = resultados.map(c => {\n  \n  // Constrói a mensagem base de contexto para orientar o LLM\n  let mensagem_base = \"\";\n  if (c.motivo === \"saldo_ok\") {\n    mensagem_base = `${c.nome}, indo direto ao ponto: para o perfil ${c.perfil}, **${c.recomendacao.produto}** (mínimo R$ ${c.recomendacao.minimo}). Você tem ${c.saldo_texto}, então dá pra aplicar. Rentabilidade: ${c.recomendacao.rentabilidade}.`;\n  } else {\n    mensagem_base = `${c.nome}, para o perfil ${c.perfil}, indicamos **${c.recomendacao.produto}**. O aporte mínimo é R$ ${c.recomendacao.minimo}, e seu saldo atual é ${c.saldo_texto}. Rentabilidade: ${c.recomendacao.rentabilidade}.`;\n  }\n\n  return {\n    json: {\n      email_to: c.email,\n      nome: c.nome,\n      perfil: c.perfil,\n      saldo_texto: c.saldo_texto,\n      saldo_num: c.saldo_num,\n      recomendacao: c.recomendacao,\n      motivo: c.motivo,\n      mensagem_base: mensagem_base,\n      copy_rules: {\n        idioma: \"pt-BR\",\n        tom: \"amigável e profissional\",\n        tamanho: \"curto (4-6 linhas)\",\n        evitar: [\n          \"promessas de ganho\",\n          \"garantias\",\n          \"linguagem agressiva\"\n        ]\n      }\n    }\n  };\n});\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        -352
+      ],
+      "id": "aee530d2-66a7-4d37-812e-b91914511151",
+      "name": "Trata LLM"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Escreva um e-mail para o cliente abaixo, utilizando as informações da mensagem base.\n\nCliente: {{$json.nome}}\nMensagem Base: {{$json.mensagem_base}}\n\nSiga rigorosamente estas regras de copy:\n- Idioma: {{$json.copy_rules.idioma}}\n- Tom: {{$json.copy_rules.tom}}\n- Tamanho: {{$json.copy_rules.tamanho}}\n- Evitar: {{$json.copy_rules.evitar.join(', ')}}\n\nVocê deve retornar APENAS um objeto JSON válido contendo o assunto, a versão em texto puro e a versão em HTML estruturado (com tags como <p>, <strong>, <br>). Não inclua formatação markdown (como ```json).\n\nUse exatamente esta estrutura:\n{\n  \"subject\": \"...\",\n  \"text_body\": \"...\",\n  \"html_body\": \"...\"\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1360,
+        -352
+      ],
+      "id": "6e66ef8e-223c-41ef-bc32-795015a1d228",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Webhook').item.json.headers['x-real-ip'] }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        1496,
+        -120
+      ],
+      "id": "90022345-1139-40b9-8932-60bd74644d69",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-2.5-flash",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1368,
+        -120
+      ],
+      "id": "5c01281f-1498-4bd7-afad-070c65c171de",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "kCtSzm2lir6zftc3",
+          "name": "OpenRouter Saben"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html_body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2160,
+        -352
+      ],
+      "id": "def5a0cd-3404-4616-9520-dfac023cca47",
+      "name": "Send a message",
+      "webhookId": "9c20a702-644b-46ca-afc2-ceb5a105e02f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "unMtkJbpFSQoGWfE",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const llmOutputs = $input.all();\n// Recupera os dados originais do nó 'Trata LLM' (nome, email_to, recomendação, etc.)\nconst dadosOriginais = $('Trata LLM').all();\n\nreturn llmOutputs.map((item, index) => {\n  const original = dadosOriginais[index].json;\n  let jsonLLM = {};\n  \n  try {\n    // O nó \"AI Agent\" envia a resposta gerada dentro da propriedade 'output'\n    let rawText = item.json.output || \"\";\n    \n    // Limpa a formatação markdown (```json ... ```) caso o modelo a inclua acidentalmente\n    rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();\n    \n    jsonLLM = JSON.parse(rawText);\n  } catch (error) {\n    jsonLLM = {\n      subject: \"Erro de processamento\",\n      text_body: \"Não foi possível extrair o JSON do LLM.\",\n      html_body: \"<p>Não foi possível extrair o JSON do LLM.</p>\"\n    };\n  }\n\n  return {\n    json: {\n      ok: true,\n      to: original.email_to,\n      subject: jsonLLM.subject,\n      text_body: jsonLLM.text_body,\n      html_body: jsonLLM.html_body,\n      // Opcional: mantém alguns campos úteis na chave 'meta' para debug ou uso futuro\n      meta: {\n        nome: original.nome,\n        perfil: original.perfil,\n        produto: original.recomendacao?.produto,\n        minimo: original.recomendacao?.minimo,\n        rentabilidade: original.recomendacao?.rentabilidade,\n        motivo: original.motivo\n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        -352
+      ],
+      "id": "0eebd590-cc7c-43d7-b4a5-f703dfd98c51",
+      "name": "Tratar Mensagem E-mail"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "029c0558-f92b-4e0e-b544-83d4285b7883",
+              "leftValue": "={{ $json.to }}",
+              "rightValue": "=^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1936,
+        -352
+      ],
+      "id": "fc494961-fd3c-4e8f-b5c7-90d4b6d3401d",
+      "name": "Verificar E-mail"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "connection": "upgrade",
+            "host": "flow.saben.com.br",
+            "x-real-ip": "10.16.0.3",
+            "x-forwarded-for": "35.197.82.121, 10.16.0.3",
+            "x-forwarded-proto": "https",
+            "content-length": "1047",
+            "user-agent": "python-requests/2.32.4",
+            "content-type": "application/json",
+            "accept": "*/*",
+            "cf-ray": "a3781b756c931319-PDX",
+            "accept-encoding": "gzip, br",
+            "cdn-loop": "cloudflare; loops=1",
+            "cf-connecting-ip": "35.197.82.121",
+            "cf-ipcountry": "US",
+            "cf-visitor": "{\"scheme\":\"https\"}"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "clientes": [
+              {
+                "nome": "Ana Silva",
+                "email": "ana@email.com",
+                "saldo": "R$ 12.500,00",
+                "perfil": "Conservador"
+              },
+              {
+                "nome": "Bruno Lima",
+                "email": "bruno@email.com",
+                "saldo": "R$ 3.200,00",
+                "perfil": "Moderado"
+              },
+              {
+                "nome": "Carla Souza",
+                "email": "carla@email.com",
+                "saldo": "R$ 28.900,00",
+                "perfil": "Arrojado"
+              },
+              {
+                "nome": "Daniel Oliveira",
+                "email": "daniel@email.com",
+                "saldo": "R$ 850,00",
+                "perfil": "Conservador"
+              },
+              {
+                "nome": "Elena Rodrigues",
+                "email": "elena@email.com",
+                "saldo": "R$ 45.000,00",
+                "perfil": "Arrojado"
+              },
+              {
+                "nome": "Felipe Santos",
+                "email": "felipe@email.com",
+                "saldo": "R$ 7.800,00",
+                "perfil": "Moderado"
+              },
+              {
+                "nome": "Gabriela Costa",
+                "email": "gabriela@email.com",
+                "saldo": "R$ 1.500,00",
+                "perfil": "Conservador"
+              },
+              {
+                "nome": "Henrique Alves",
+                "email": "henrique@email.com",
+                "saldo": "R$ 22.300,00",
+                "perfil": "Moderado"
+              },
+              {
+                "nome": "Isabela Martins",
+                "email": "isabela@email.com",
+                "saldo": "R$ 500,00",
+                "perfil": "Conservador"
+              },
+              {
+                "nome": "João Pereira",
+                "email": "joao@email.com",
+                "saldo": "R$ 15.000,00",
+                "perfil": "Arrojado"
+              }
+            ]
+          },
+          "webhookUrl": "https://flow.saben.com.br/webhook-test/clientes-rpa-dio",
+          "executionMode": "test"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ],
+    "AI Agent": [
+      {
+        "json": {
+          "output": "{\n  \"subject\": \"Sugestão de investimento em Poupança para seu perfil conservador\",\n  \"text_body\": \"Olá Ana Silva,\\nPara o seu perfil conservador, sugerimos a aplicação em Poupança (mínimo R$ 100).\\nVocê possui R$ 12.500,00 disponíveis, então pode investir.\\nA rentabilidade atual é de 6,2% ao ano.\\nEstou à disposição para esclarecer dúvidas ou iniciar a aplicação.\",\n  \"html_body\": \"<p>Ol\\u00e1 Ana Silva,</p><p>Para o seu perfil conservador, sugerimos a aplica\\u00e7\\u00e3o em <strong>Poupan\\u00e7a</strong> (m\\u00ednimo R$ 100).</p><p>Voc\\u00ea possui <strong>R$ 12.500,00</strong> dispon\\u00edveis, ent\\u00e3o pode investir.</p><p>A rentabilidade atual \\u00e9 de <strong>6,2% ao ano</strong>.</p><p>Estou \\u00e0 disposi\\u00e7\\u00e3o para esclarecer d\\u00favidas ou iniciar a aplica\\u00e7\\u00e3o.</p>\"\n}"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      },
+      {
+        "json": {
+          "output": "{\n  \"subject\": \"Sugestão de investimento em CDB Prefixado para seu perfil moderado\",\n  \"text_body\": \"Olá Bruno Lima,\\nPara o seu perfil moderado, recomendamos o CDB Prefixado (mínimo R$ 1.000).\\nCom R$ 3.200,00 disponíveis, você pode aplicar o valor total.\\nA rentabilidade atual é de 14,0% ao ano.\\nCaso queira avançar ou tenha dúvidas, estou à disposição.\",\n  \"html_body\": \"<p>Olá Bruno Lima,</p><p>Para o seu perfil moderado, recomendamos o <strong>CDB Prefixado</strong> (mínimo R$ 1.000).</p><p>Com <strong>R$ 3.200,00</strong> disponíveis, você pode aplicar o valor total.</p><p>A rentabilidade atual é de <strong>14,0% ao ano</strong>.</p><p>Caso queira avançar ou tenha dúvidas, estou à disposição.</p>\"\n}"
+        },
+        "pairedItem": {
+          "item": 1
+        }
+      },
+      {
+        "json": {
+          "output": "{\n  \"subject\": \"Sugestão de investimento em Ações ETF para seu perfil arrojado\",\n  \"text_body\": \"Olá Carla Souza,\\nPara o seu perfil arrojado, sugerimos investimento em Ações ETF (mínimo R$ 500).\\nCom R$ 28.900,00 disponíveis, você pode aplicar o valor total desejado.\\nA rentabilidade é variável, conforme o mercado.\\nEstou à disposição para esclarecer dúvidas ou iniciar a aplicação.\",\n  \"html_body\": \"<p>Olá Carla Souza,</p><p>Para o seu perfil arrojado, sugerimos investimento em <strong>Ações ETF</strong> (mínimo R$ 500).</p><p>Com <strong>R$ 28.900,00</strong> disponíveis, você pode aplicar o valor total desejado.</p><p>A rentabilidade é <strong>variável</strong>, conforme o mercado.</p><p>Estou à disposição para esclarecer dúvidas ou iniciar a aplicação.</p>\"\n}"
+        },
+        "pairedItem": {
+          "item": 2
+        }
+      },
+      {
+        "json": {
+          "output": "{\n  \"subject\": \"Sugestão de investimento em Poupança para seu perfil conservador\",\n  \"text_body\": \"Olá Daniel Oliveira,\\nPara o seu perfil conservador, recomendamos a aplicação em Poupança (mínimo R$ 100).\\nVocê possui R$ 850,00 disponíveis, então pode investir.\\nA rentabilidade atual é de 6,2% ao ano.\\nEstou à disposição para esclarecer dúvidas ou iniciar a aplicação.\",\n  \"html_body\": \"<p>Ol\\u00e1 Daniel Oliveira,</p><p>Para o seu perfil conservador, recomendamos a aplica\\u00e7\\u00e3o em <strong>Poupan\\u00e7a</strong> (m\\u00ednimo R$ 100).</p><p>Voc\\u00ea possui <strong>R$ 850,00</strong> dispon\\u00edveis, ent\\u00e3o pode investir.</p><p>A rentabilidade atual \\u00e9 de <strong>6,2% ao ano</strong>.</p><p>Estou \\u00e0 disposi\\u00e7\\u00e3o para esclarecer d\\u00favidas ou iniciar a aplica\\u00e7\\u00e3o.</p>\"\n}"
+        },
+        "pairedItem": {
+          "item": 3
+        }
+      },
+      {
+        "json": {
+          "output": "{\n  \"subject\": \"Sugestão de investimento em Ações ETF para seu perfil arrojado\",\n  \"text_body\": \"Olá Elena Rodrigues,\\nPara o seu perfil arrojado, sugerimos investimento em Ações ETF (mínimo R$ 500).\\nVocê dispõe de R$ 45.000,00, podendo aplicar o valor que desejar.\\nA rentabilidade é variável, de acordo com o mercado.\\nEstou à disposição para esclarecer dúvidas ou iniciar a aplicação.\",\n  \"html_body\": \"<p>Ol\\u00e1 Elena Rodrigues,</p><p>Para o seu perfil arrojado, sugerimos investimento em <strong>A\\u00e7\\u00f5es ETF</strong> (m\\u00ednimo R$ 500).</p><p>Voc\\u00ea disp\\u00f5e de <strong>R$ 45.000,00</strong>, podendo aplicar o valor que desejar.</p><p>A rentabilidade \\u00e9 <strong>vari\\u00e1vel</strong>, de acordo com o mercado.</p><p>Estou \\u00e0 disposi\\u00e7\\u00e3o para esclarecer d\\u00favidas ou iniciar a aplica\\u00e7\\u00e3o.</p>\"\n}"
+        },
+        "pairedItem": {
+          "item": 4
+        }
+      },
+      {
+        "json": {
+          "output": "{\n  \"subject\": \"Sugestão de investimento em CDB Prefixado para seu perfil moderado\",\n  \"text_body\": \"Olá Felipe Santos,\\nPara o seu perfil moderado, recomendamos o CDB Prefixado (mínimo R$ 1.000).\\nCom R$ 7.800,00 disponíveis, você pode aplicar o valor total.\\nA rentabilidade atual é de 14,0% ao ano.\\nCaso queira avançar ou tenha dúvidas, estou à disposição.\",\n  \"html_body\": \"<p>Ol\\u00e1 Felipe Santos,</p><p>Para o seu perfil moderado, recomendamos o <strong>CDB Prefixado</strong> (m\\u00ednimo R$ 1.000).</p><p>Com <strong>R$ 7.800,00</strong> dispon\\u00edveis, voc\\u00ea pode aplicar o valor total.</p><p>A rentabilidade atual \\u00e9 de <strong>14,0% ao ano</strong>.</p><p>Caso queira avan\\u00e7ar ou tenha d\\u00favidas, estou \\u00e0 disposi\\u00e7\\u00e3o.</p>\"\n}"
+        },
+        "pairedItem": {
+          "item": 5
+        }
+      },
+      {
+        "json": {
+          "output": "{\n  \"subject\": \"Sugestão de investimento em Poupança para seu perfil conservador\",\n  \"text_body\": \"Olá Gabriela Costa,\\nPara o seu perfil conservador, recomendamos a aplicação em Poupança (mínimo R$ 100).\\nVocê possui R$ 1.500,00 disponíveis, então pode investir.\\nA rentabilidade atual é de 6,2% ao ano.\\nEstou à disposição para esclarecer dúvidas ou iniciar a aplicação.\",\n  \"html_body\": \"<p>Ol\\u00e1 Gabriela Costa,</p><p>Para o seu perfil conservador, recomendamos a aplica\\u00e7\\u00e3o em <strong>Poupan\\u00e7a</strong> (m\\u00ednimo R$ 100).</p><p>Voc\\u00ea possui <strong>R$ 1.500,00</strong> dispon\\u00edveis, ent\\u00e3o pode investir.</p><p>A rentabilidade atual \\u00e9 de <strong>6,2% ao ano</strong>.</p><p>Estou \\u00e0 disposi\\u00e7\\u00e3o para esclarecer d\\u00favidas ou iniciar a aplica\\u00e7\\u00e3o.</p>\"\n}"
+        },
+        "pairedItem": {
+          "item": 6
+        }
+      },
+      {
+        "json": {
+          "output": "{\n  \"subject\": \"Sugestão de investimento em CDB Prefixado para seu perfil moderado\",\n  \"text_body\": \"Olá Henrique Alves,\\nPara o seu perfil moderado, recomendamos o CDB Prefixado (mínimo R$ 1.000).\\nCom R$ 22.300,00 disponíveis, você pode aplicar o valor total.\\nA rentabilidade atual é de 14,0% ao ano.\\nCaso queira avançar ou tenha dúvidas, estou à disposição.\",\n  \"html_body\": \"<p>Ol\\u00e1 Henrique Alves,</p><p>Para o seu perfil moderado, recomendamos o <strong>CDB Prefixado</strong> (m\\u00ednimo R$ 1.000).</p><p>Com <strong>R$ 22.300,00</strong> dispon\\u00edveis, voc\\u00ea pode aplicar o valor total.</p><p>A rentabilidade atual \\u00e9 de <strong>14,0% ao ano</strong>.</p><p>Caso queira avan\\u00e7ar ou tenha d\\u00favidas, estou \\u00e0 disposi\\u00e7\\u00e3o.</p>\"\n}"
+        },
+        "pairedItem": {
+          "item": 7
+        }
+      },
+      {
+        "json": {
+          "output": "{\n  \"subject\": \"Sugestão de investimento em Poupança para seu perfil conservador\",\n  \"text_body\": \"Olá Isabela Martins,\\nPara o seu perfil conservador, recomendamos a aplicação em Poupança (mínimo R$ 100).\\nVocê possui R$ 500,00 disponíveis, então pode investir.\\nA rentabilidade atual é de 6,2% ao ano.\\nEstou à disposição para esclarecer dúvidas ou iniciar a aplicação.\",\n  \"html_body\": \"<p>Ol\\u00e1 Isabela Martins,</p><p>Para o seu perfil conservador, recomendamos a aplica\\u00e7\\u00e3o em <strong>Poupan\\u00e7a</strong> (m\\u00ednimo R$ 100).</p><p>Voc\\u00ea possui <strong>R$ 500,00</strong> dispon\\u00edveis, ent\\u00e3o pode investir.</p><p>A rentabilidade atual \\u00e9 de <strong>6,2% ao ano</strong>.</p><p>Estou \\u00e0 disposi\\u00e7\\u00e3o para esclarecer d\\u00favidas ou iniciar a aplica\\u00e7\\u00e3o.</p>\"\n}"
+        },
+        "pairedItem": {
+          "item": 8
+        }
+      },
+      {
+        "json": {
+          "output": "{\n  \"subject\": \"Sugestão de investimento em Ações ETF para seu perfil arrojado\",\n  \"text_body\": \"Olá João Pereira,\\nPara o seu perfil arrojado, sugerimos investimento em Ações ETF (mínimo R$ 500).\\nVocê dispõe de R$ 15.000,00, podendo aplicar o valor que desejar.\\nA rentabilidade é variável, de acordo com o mercado.\\nEstou à disposição para esclarecer dúvidas ou iniciar a aplicação.\",\n  \"html_body\": \"<p>Ol\\u00e1 Jo\\u00e3o Pereira,</p><p>Para o seu perfil arrojado, sugerimos investimento em <strong>A\\u00e7\\u00f5es ETF</strong> (m\\u00ednimo R$ 500).</p><p>Voc\\u00ea disp\\u00f5e de <strong>R$ 15.000,00</strong>, podendo aplicar o valor que desejar.</p><p>A rentabilidade \\u00e9 <strong>vari\\u00e1vel</strong>, de acordo com o mercado.</p><p>Estou \\u00e0 disposi\\u00e7\\u00e3o para esclarecer d\\u00favidas ou iniciar a aplica\\u00e7\\u00e3o.</p>\"\n}"
+        },
+        "pairedItem": {
+          "item": 9
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Perfil Investidor",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Combinar Clientes e Perfis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Perfil Investidor": {
+      "main": [
+        [
+          {
+            "node": "Converter em JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Converter em JSON": {
+      "main": [
+        [
+          {
+            "node": "Combinar Clientes e Perfis",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Combinar Clientes e Perfis": {
+      "main": [
+        [
+          {
+            "node": "Mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mensagem": {
+      "main": [
+        [
+          {
+            "node": "Trata LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trata LLM": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Tratar Mensagem E-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tratar Mensagem E-mail": {
+      "main": [
+        [
+          {
+            "node": "Verificar E-mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar E-mail": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b5327f1f-e8f2-4ae6-a79b-8c14a2cd565d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7ddd4e76830ceaf8229819acd6b9b1e4acc6eaf42934cfb32fa4d41c4ffb04e8"
+  },
+  "nodeGroups": [],
+  "id": "ktGoDo9tnEQPlml4",
+  "tags": []
+}
